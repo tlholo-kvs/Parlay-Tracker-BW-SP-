@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   DailySummary,
   LedgerBet,
@@ -7,6 +7,7 @@ import {
   SportType,
   StrategyCandidateLeg,
 } from '../types';
+import { buildTelegramSlipText, calculateModelOdds, decimalOdds } from '../lib/modelOdds';
 import {
   AlertOctagon,
   AlertTriangle,
@@ -221,6 +222,58 @@ export const LowRiskLedgerView: React.FC = () => {
   const [legWarning, setLegWarning] = useState<string | null>(null);
   const [dailySummary, setDailySummary] = useState<DailySummary | null>(null);
 
+  // Model-driven odds builder for custom bookmaker-style fair prices
+  const [modelFixture, setModelFixture] = useState<string>('Arsenal vs Chelsea');
+  const [modelLeague, setModelLeague] = useState<'Football (EPL)' | 'Football (PSL)' | 'Basketball (NBA)' | 'Tennis (ATP/WTA)'>('Football (EPL)');
+  const [modelMarket, setModelMarket] = useState<'HOME_WIN' | 'DRAW' | 'AWAY_WIN' | 'OVER_2_5' | 'UNDER_2_5'>('OVER_2_5');
+  const [homeStrength, setHomeStrength] = useState<number>(72);
+  const [awayStrength, setAwayStrength] = useState<number>(64);
+  const [homeForm, setHomeForm] = useState<number>(71);
+  const [awayForm, setAwayForm] = useState<number>(58);
+  const [homeAttack, setHomeAttack] = useState<number>(79);
+  const [awayAttack, setAwayAttack] = useState<number>(63);
+  const [homeDefense, setHomeDefense] = useState<number>(68);
+  const [awayDefense, setAwayDefense] = useState<number>(72);
+  const [homeAdvantage, setHomeAdvantage] = useState<number>(12);
+
+  const modelProjection = useMemo(
+    () =>
+      calculateModelOdds({
+        homeStrength,
+        awayStrength,
+        homeForm,
+        awayForm,
+        homeAttack,
+        awayAttack,
+        homeDefense,
+        awayDefense,
+        homeAdvantage,
+      }),
+    [awayAttack, awayDefense, awayForm, awayStrength, homeAdvantage, homeAttack, homeDefense, homeForm, homeStrength]
+  );
+
+  const modelOdds =
+    modelMarket === 'HOME_WIN'
+      ? modelProjection.bookmakerOdds.home
+      : modelMarket === 'DRAW'
+      ? modelProjection.bookmakerOdds.draw
+      : modelMarket === 'AWAY_WIN'
+      ? modelProjection.bookmakerOdds.away
+      : modelMarket === 'UNDER_2_5'
+      ? modelProjection.bookmakerOdds.under2_5
+      : modelProjection.bookmakerOdds.over2_5;
+
+  const modelMarketLabel =
+    modelMarket === 'HOME_WIN'
+      ? 'Home Win'
+      : modelMarket === 'DRAW'
+      ? 'Draw'
+      : modelMarket === 'AWAY_WIN'
+      ? 'Away Win'
+      : modelMarket === 'UNDER_2_5'
+      ? 'Under 2.5 Goals'
+      : 'Over 2.5 Goals';
+
   // Derived Running Bankroll Metrics
   const settledBets = bets.filter((b) => b.status !== 'PENDING');
   const totalStakedOnSettled = settledBets.reduce((acc, b) => acc + b.stakeZar, 0);
@@ -293,6 +346,23 @@ export const LowRiskLedgerView: React.FC = () => {
       setStagedLegs([...stagedLegs, candidate]);
       setLegWarning(null);
     }
+  };
+
+  const handleGenerateModelLeg = () => {
+    const candidate: StrategyCandidateLeg = {
+      id: `model-${Date.now()}`,
+      fixture: modelFixture,
+      sport: modelLeague,
+      league: modelLeague === 'Football (EPL)' ? 'English Premier League' : modelLeague === 'Football (PSL)' ? 'SA Premier Soccer League' : modelLeague === 'Basketball (NBA)' ? 'NBA Basketball' : 'ATP/WTA',
+      market: modelMarket === 'OVER_2_5' ? 'Total Match Goals - Over 2.5' : modelMarket === 'UNDER_2_5' ? 'Total Match Goals - Under 2.5' : modelMarket === 'HOME_WIN' ? 'Match Result - Home Win' : modelMarket === 'DRAW' ? 'Match Result - Draw' : 'Match Result - Away Win',
+      odds: Number(modelOdds.toFixed(2)),
+      strategyNote: `Model-driven fair odds from expected goals engine: ${modelProjection.expectedGoals.home} xG home / ${modelProjection.expectedGoals.away} xG away (${modelMarketLabel})`,
+      isCompliant: true,
+    };
+
+    handleAddLeg(candidate);
+    setStakeWarning(null);
+    setLegWarning(null);
   };
 
   const handleRemoveLeg = (legId: string) => {
@@ -532,6 +602,145 @@ export const LowRiskLedgerView: React.FC = () => {
           </div>
           <div className="text-zinc-400 text-[11px] mt-0.5">
             {wonCount} won / {settledBets.length} settled
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Own Odds Model Engine */}
+      <div className="border border-zinc-800 bg-zinc-900/40 rounded-xl p-5 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-mono text-amber-400">
+            <Target className="w-4 h-4" />
+            <span>MODEL-DRIVEN FAIR ODDS ENGINE</span>
+          </div>
+          <div className="text-[11px] text-zinc-500 font-mono">
+            Expected goals: {modelProjection.expectedGoals.home} xG / {modelProjection.expectedGoals.away} xG
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <label className="text-[11px] font-mono text-zinc-400">Fixture</label>
+              <input
+                value={modelFixture}
+                onChange={(e) => setModelFixture(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-mono text-zinc-400">League</label>
+              <select
+                value={modelLeague}
+                onChange={(e) => setModelLeague(e.target.value as 'Football (EPL)' | 'Football (PSL)' | 'Basketball (NBA)' | 'Tennis (ATP/WTA)')}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+              >
+                <option value="Football (EPL)">Football (EPL)</option>
+                <option value="Football (PSL)">Football (PSL)</option>
+                <option value="Basketball (NBA)">Basketball (NBA)</option>
+                <option value="Tennis (ATP/WTA)">Tennis (ATP/WTA)</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-mono text-zinc-400">Home strength</label>
+              <input type="range" min="40" max="95" value={homeStrength} onChange={(e) => setHomeStrength(Number(e.target.value))} className="w-full accent-amber-400" />
+              <div className="text-[11px] text-zinc-500 font-mono">{homeStrength}</div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-mono text-zinc-400">Away strength</label>
+              <input type="range" min="40" max="95" value={awayStrength} onChange={(e) => setAwayStrength(Number(e.target.value))} className="w-full accent-amber-400" />
+              <div className="text-[11px] text-zinc-500 font-mono">{awayStrength}</div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-mono text-zinc-400">Home form</label>
+              <input type="range" min="40" max="95" value={homeForm} onChange={(e) => setHomeForm(Number(e.target.value))} className="w-full accent-amber-400" />
+              <div className="text-[11px] text-zinc-500 font-mono">{homeForm}</div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-mono text-zinc-400">Away form</label>
+              <input type="range" min="40" max="95" value={awayForm} onChange={(e) => setAwayForm(Number(e.target.value))} className="w-full accent-amber-400" />
+              <div className="text-[11px] text-zinc-500 font-mono">{awayForm}</div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-mono text-zinc-400">Home attack</label>
+              <input type="range" min="40" max="95" value={homeAttack} onChange={(e) => setHomeAttack(Number(e.target.value))} className="w-full accent-amber-400" />
+              <div className="text-[11px] text-zinc-500 font-mono">{homeAttack}</div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-mono text-zinc-400">Away attack</label>
+              <input type="range" min="40" max="95" value={awayAttack} onChange={(e) => setAwayAttack(Number(e.target.value))} className="w-full accent-amber-400" />
+              <div className="text-[11px] text-zinc-500 font-mono">{awayAttack}</div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-mono text-zinc-400">Home defence</label>
+              <input type="range" min="40" max="95" value={homeDefense} onChange={(e) => setHomeDefense(Number(e.target.value))} className="w-full accent-amber-400" />
+              <div className="text-[11px] text-zinc-500 font-mono">{homeDefense}</div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-mono text-zinc-400">Away defence</label>
+              <input type="range" min="40" max="95" value={awayDefense} onChange={(e) => setAwayDefense(Number(e.target.value))} className="w-full accent-amber-400" />
+              <div className="text-[11px] text-zinc-500 font-mono">{awayDefense}</div>
+            </div>
+          </div>
+
+          <div className="border border-zinc-800 bg-zinc-950/70 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400">
+              <span>Market</span>
+              <span>Fair Odds</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                ['HOME_WIN', 'Home Win', modelProjection.bookmakerOdds.home],
+                ['DRAW', 'Draw', modelProjection.bookmakerOdds.draw],
+                ['AWAY_WIN', 'Away Win', modelProjection.bookmakerOdds.away],
+                ['OVER_2_5', 'Over 2.5', modelProjection.bookmakerOdds.over2_5],
+                ['UNDER_2_5', 'Under 2.5', modelProjection.bookmakerOdds.under2_5],
+              ].map(([key, label, odds]) => (
+                <button
+                  key={key}
+                  onClick={() => setModelMarket(key as 'HOME_WIN' | 'DRAW' | 'AWAY_WIN' | 'OVER_2_5' | 'UNDER_2_5')}
+                  className={`p-2 rounded-lg border text-left transition-colors ${
+                    modelMarket === key
+                      ? 'border-amber-500 bg-amber-500/10 text-amber-300'
+                      : 'border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700'
+                  }`}
+                >
+                  <div className="text-[10px] font-mono text-zinc-500">{label}</div>
+                  <div className="mt-1 text-sm font-bold font-mono">{Number(odds).toFixed(2)}</div>
+                </button>
+              ))}
+            </div>
+
+            <div className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-3 text-xs text-amber-300">
+              <div className="font-mono text-[10px] uppercase text-amber-400">Selected market</div>
+              <div className="mt-1 font-semibold">{modelMarketLabel}</div>
+              <div className="mt-1 text-zinc-300 font-mono">Fair price: {modelOdds.toFixed(2)}</div>
+              <div className="mt-1 text-zinc-400">Probability: {(modelMarket === 'HOME_WIN' ? modelProjection.probabilities.home : modelMarket === 'DRAW' ? modelProjection.probabilities.draw : modelMarket === 'AWAY_WIN' ? modelProjection.probabilities.away : modelMarket === 'UNDER_2_5' ? modelProjection.probabilities.under2_5 : modelProjection.probabilities.over2_5).toFixed(3)}</div>
+            </div>
+
+            <button
+              onClick={handleGenerateModelLeg}
+              className="w-full bg-amber-400 hover:bg-amber-300 text-zinc-950 font-semibold py-2.5 rounded-lg text-xs cursor-pointer transition-colors"
+            >
+              Add model leg to slip builder
+            </button>
+
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3 text-[11px] text-zinc-300">
+              <div className="font-mono text-zinc-500 uppercase">Telegram-ready summary</div>
+              <div className="mt-2 whitespace-pre-line text-zinc-300">
+                {buildTelegramSlipText(modelFixture, modelMarketLabel, modelOdds, inputStake)}
+              </div>
+            </div>
           </div>
         </div>
       </div>
