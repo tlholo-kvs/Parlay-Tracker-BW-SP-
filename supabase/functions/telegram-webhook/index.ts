@@ -2,7 +2,8 @@
 // Deploy to your Supabase project (e.g., rmawoakhlrxeqhdqcpur) using:
 // supabase functions deploy telegram-webhook --no-verify-jwt
 
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// @ts-expect-error Deno resolves std URL imports at runtime; this can be missing in some editor TS configs.
+import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";

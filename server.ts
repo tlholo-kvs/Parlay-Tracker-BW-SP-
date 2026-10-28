@@ -42,6 +42,85 @@ async function callTelegramApi(token: string, method: string, payload: any) {
   return await response.json();
 }
 
+async function fetchFixtureFeedFromSportsApi() {
+  const apiKey = process.env.SPORTS_API_KEY;
+  const baseUrl = process.env.SPORTS_API_BASE_URL || 'https://v3.football.api-sports.io';
+
+  if (!apiKey) {
+    return {
+      source: 'fallback',
+      fixtures: [
+        {
+          fixture: 'Mamelodi Sundowns vs Orlando Pirates',
+          sport: 'Football (PSL)',
+          league: 'SA Premier Soccer League',
+          market: 'Total Match Goals - Over 2.5',
+          odds: 1.46,
+          strategyNote: 'Fallback fixture from the embedded tracker. Add SPORTS_API_KEY to use the live API feed.',
+          isCompliant: true,
+        },
+        {
+          fixture: 'Arsenal vs Chelsea',
+          sport: 'Football (EPL)',
+          league: 'English Premier League',
+          market: 'Total Match Goals - Over 1.5',
+          odds: 1.45,
+          strategyNote: 'Fallback fixture from the embedded tracker. Add SPORTS_API_KEY to use the live API feed.',
+          isCompliant: true,
+        },
+      ],
+    };
+  }
+
+  try {
+    const response = await fetch(`${baseUrl}/fixtures?live=all`, {
+      headers: {
+        'x-apisports-key': apiKey,
+        'x-rapidapi-key': apiKey,
+        'User-Agent': 'ParlayPulse-SA/1.0',
+      },
+    });
+
+    if (!response.ok) {
+      return { source: 'fallback', fixtures: [] };
+    }
+
+    const data = await response.json();
+    const fixtures = Array.isArray(data?.response) ? data.response : [];
+
+    const mapped = fixtures.slice(0, 8).map((item: any) => {
+      const home = item?.teams?.home?.name || 'Home Team';
+      const away = item?.teams?.away?.name || 'Away Team';
+      const leagueName = item?.league?.name || 'Live Fixture';
+      const leagueSport = leagueName.toLowerCase().includes('nba') ? 'Basketball (NBA)' : 'Football (EPL)';
+      const liveOdds = item?.odds?.markets?.[0]?.outcomes?.[0]?.odd ?? 1.45;
+      const market =
+        leagueSport === 'Basketball (NBA)'
+          ? 'Game Total Points - Over 210.5'
+          : 'Total Match Goals - Over 2.5';
+
+      return {
+        fixture: `${home} vs ${away}`,
+        sport: leagueSport,
+        league: leagueName,
+        market,
+        odds: Number(liveOdds),
+        strategyNote: 'Live API fixture synced from the sports feed.',
+        isCompliant: true,
+      };
+    });
+
+    if (mapped.length === 0) {
+      return { source: 'fallback', fixtures: [] };
+    }
+
+    return { source: 'live', fixtures: mapped };
+  } catch (error) {
+    console.error('Sports API feed failed:', error);
+    return { source: 'fallback', fixtures: [] };
+  }
+}
+
 // Regex helpers matching serverless/parser.py
 const FIXTURE_REGEX = /([A-Za-z0-9\.\s\-\'\&]+?)\s+(?:vs\.?|v\.?|\-)\s+([A-Za-z0-9\.\s\-\'\&]+?)(?=\s+(?:\d{1,2}[\/\-\:]|kick[\s\-]?off|total|over|under|1x2|match|\n|$))/i;
 const GOALS_OU_REGEX = /(?:total\s+(?:match\s+)?goals|match\s+goals|goals)?[\s\:\-]*(over|under|o\/?u|o|u)[\s\:\-]*([0-9]+(?:\.[0-9]+)?)\s*(?:goals)?/i;
@@ -362,12 +441,26 @@ app.post(['/api/webhook/telegram', '/webhook/telegram'], async (req: Request, re
   });
 });
 
-// 3. Webhook Events feed for the UI
+// 3. Sports Feed Proxy for the UI
+app.get('/api/sports/fixtures', async (req: Request, res: Response) => {
+  const feed = await fetchFixtureFeedFromSportsApi();
+  res.json(feed);
+});
+
+app.get('/api/sports/config', (req: Request, res: Response) => {
+  res.json({
+    provider: process.env.SPORTS_API_KEY ? 'api-sports' : 'fallback',
+    hasApiKey: Boolean(process.env.SPORTS_API_KEY),
+    baseUrl: process.env.SPORTS_API_BASE_URL || 'https://v3.football.api-sports.io',
+  });
+});
+
+// 4. Webhook Events feed for the UI
 app.get('/api/webhook/events', (req: Request, res: Response) => {
   res.json({ events: webhookEvents });
 });
 
-// 4. Telegram API Proxies (bypasses browser CORS restrictions)
+// 5. Telegram API Proxies (bypasses browser CORS restrictions)
 app.post('/api/telegram/getMe', async (req: Request, res: Response) => {
   const token = req.body.token || process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {

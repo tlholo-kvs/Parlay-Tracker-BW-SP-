@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   DailySummary,
   LedgerBet,
@@ -213,6 +213,30 @@ export const LowRiskLedgerView: React.FC = () => {
   const [initialBankroll, setInitialBankroll] = useState<number>(500.0);
   const [bets, setBets] = useState<LedgerBet[]>(INITIAL_LEDGER_BETS);
   const [selectedSportFilter, setSelectedSportFilter] = useState<string>('ALL');
+  const [liveApiFixtures, setLiveApiFixtures] = useState<StrategyCandidateLeg[]>([]);
+  const [liveFeedSource, setLiveFeedSource] = useState<'live' | 'fallback'>('fallback');
+
+  useEffect(() => {
+    let ignore = false;
+
+    const loadLiveFeed = async () => {
+      try {
+        const res = await fetch('/api/sports/fixtures');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (ignore) return;
+        setLiveApiFixtures(Array.isArray(data.fixtures) ? data.fixtures : []);
+        setLiveFeedSource(data.source === 'live' ? 'live' : 'fallback');
+      } catch {
+        // Keep the seeded strategy list when the feed is unavailable.
+      }
+    };
+
+    loadLiveFeed();
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   // Slip Builder State
   const [slipType, setSlipType] = useState<SlipCategory>('SINGLE_STRAIGHT');
@@ -475,10 +499,19 @@ export const LowRiskLedgerView: React.FC = () => {
     });
   };
 
+  const allStrategyCandidates = useMemo(() => {
+    const merged = [...CANDIDATE_FIXTURES, ...liveApiFixtures];
+    const deduped = new Map<string, StrategyCandidateLeg>();
+    merged.forEach((candidate) => {
+      deduped.set(`${candidate.fixture}|${candidate.market}`, candidate);
+    });
+    return Array.from(deduped.values());
+  }, [liveApiFixtures]);
+
   const filteredCandidates =
     selectedSportFilter === 'ALL'
-      ? CANDIDATE_FIXTURES
-      : CANDIDATE_FIXTURES.filter((c) => c.sport === selectedSportFilter);
+      ? allStrategyCandidates
+      : allStrategyCandidates.filter((c) => c.sport === selectedSportFilter);
 
   return (
     <div className="space-y-8">
@@ -614,7 +647,7 @@ export const LowRiskLedgerView: React.FC = () => {
             <span>MODEL-DRIVEN FAIR ODDS ENGINE</span>
           </div>
           <div className="text-[11px] text-zinc-500 font-mono">
-            Expected goals: {modelProjection.expectedGoals.home} xG / {modelProjection.expectedGoals.away} xG
+            Feed: {liveFeedSource === 'live' ? 'Live API' : 'Fallback Seed'} · Expected goals: {modelProjection.expectedGoals.home} xG / {modelProjection.expectedGoals.away} xG
           </div>
         </div>
 
