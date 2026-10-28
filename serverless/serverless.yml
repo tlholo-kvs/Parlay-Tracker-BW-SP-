@@ -1,0 +1,39 @@
+service: serverless-parlay-tracker
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: python3.11
+  region: af-south-1 # Cape Town region for lowest latency to Betway/Supabets SA
+  timeout: 15
+  memorySize: 256
+  environment:
+    SUPABASE_URL: ${env:SUPABASE_URL}
+    SUPABASE_KEY: ${env:SUPABASE_KEY}
+    TELEGRAM_BOT_TOKEN: ${env:TELEGRAM_BOT_TOKEN}
+    SPORTS_API_KEY: ${env:SPORTS_API_KEY}
+    HTTP_TIMEOUT_SECONDS: "8.0"
+
+functions:
+  # Component A: Ingestion Function (Webhook Listener)
+  ingestionWebhook:
+    handler: ingestion_handler.lambda_handler
+    description: "HTTP POST webhook endpoint for Telegram Bot betslip ingestion"
+    events:
+      - httpApi:
+          path: /webhook/telegram
+          method: post
+
+  # Component B: Polling & Alarm Function (Scheduled Cron)
+  pollingAlarmCron:
+    handler: polling_alarm_handler.cron_handler
+    description: "Scheduled 60-second cron runner to poll live matches and dispatch Telegram alarms"
+    events:
+      - schedule:
+          rate: rate(1 minute)
+          enabled: true
+          description: "Polls active pending slip legs past kick-off time every 60 seconds"
+
+plugins:
+  - serverless-python-requirements

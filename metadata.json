@@ -1,0 +1,7 @@
+{
+  "name": "Serverless Parlay Tracker - Betway & Supabets",
+  "description": "Stateless Serverless Parlay (Multi-Bet) Tracker for Betway and Supabets with Telegram webhook ingestion, Over/Under market parsing, and 60-second cron live alarm dispatcher.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
