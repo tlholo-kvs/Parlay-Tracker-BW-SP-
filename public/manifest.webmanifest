@@ -1,0 +1,10 @@
+{
+  "name": "Parlay Tracker",
+  "short_name": "Parlay Tracker",
+  "description": "Live Betway and Supabets parlay tracker",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "orientation": "any"
+}
